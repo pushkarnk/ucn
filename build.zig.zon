@@ -1,0 +1,22 @@
+.{
+    .name = .ucn,
+    .version = "0.0.0",
+    .fingerprint = 0x49a107921510007b,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{ .yaml = .{
+        .name = "yaml",
+        .url = "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.2.0.tar.gz",
+        .hash = "zig_yaml-0.2.0-C1161pmrAgC_rL9WzjvgNg7HnmyAMwHsG3Sre0F4haPI",
+        .version = "0.2.0",
+    }, .serde = .{
+        .name = "serde",
+        .url = "https://github.com/OrlovEvgeny/serde.zig/archive/refs/tags/v1.0.5.tar.gz",
+        .hash = "serde-1.0.1-1DszT_hrDQAURHcyOhR7wEKwqbF8FYl8vN26pKLLCkWn",
+        .version = "1.0.5",
+    } },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
