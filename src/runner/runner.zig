@@ -136,5 +136,13 @@ fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Command) 
     }
 
     log.info("Executing {s} command in container: {s}", .{ @tagName(cmd), command });
-    _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-c", command });
+
+    // Only the long-running start command is detached. setup (and stop) run in
+    // the foreground so docker exec blocks until they complete, guaranteeing
+    // setup-command finishes before start-command begins.
+    if (cmd == .start) {
+        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-c", command });
+    } else {
+        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-w", "/app", name, "sh", "-c", command });
+    }
 }
