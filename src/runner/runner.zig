@@ -40,6 +40,7 @@ pub fn run(path: []const u8, config: UcnConfig) !void {
 fn relaunch(arena: *Arena, name: []const u8, config: UcnConfig) anyerror!void {
     try dockerExec(arena, name, config, .stop);
     try dockerExec(arena, name, config, .start);
+    try waitForReady(arena, config);
 }
 
 fn runInContainerImpl(arena: *Arena, rock_name: []const u8, config: UcnConfig) !void {
@@ -56,7 +57,45 @@ fn runInContainerImpl(arena: *Arena, rock_name: []const u8, config: UcnConfig) !
     _ = try dockerRun(arena, name, version, config);
     _ = try dockerExec(arena, name, config, .setup);
     _ = try dockerExec(arena, name, config, .start);
+    try waitForReady(arena, config);
     try watcher.watch(".", relaunch, arena, name, config);
+}
+
+const default_readiness_timeout_s: u64 = 30;
+
+fn probeSucceeds(arena: *Arena, command: []const u8) bool {
+    var child = std.process.Child.init(
+        &.{ "sh", "-c", command },
+        arena.allocator(),
+    );
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    child.spawn() catch return false;
+    const term = child.wait() catch return false;
+    return switch (term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
+}
+
+fn waitForReady(arena: *Arena, config: UcnConfig) !void {
+    const command = config.@"readiness-probe" orelse return;
+    if (command.len == 0) return;
+
+    const timeout_s = config.@"readiness-timeout" orelse default_readiness_timeout_s;
+    log.info("Waiting up to {d}s for readiness probe: {s}", .{ timeout_s, command });
+
+    var elapsed: u64 = 0;
+    while (elapsed < timeout_s) : (elapsed += 1) {
+        if (probeSucceeds(arena, command)) {
+            log.info("Application ready after {d}s", .{elapsed});
+            return;
+        }
+        std.Thread.sleep(std.time.ns_per_s);
+    }
+
+    log.err("Readiness probe did not succeed within {d}s", .{timeout_s});
+    return error.ReadinessProbeTimeout;
 }
 
 fn dockerRun(arena: *Arena, name: []const u8, version: []const u8, config: UcnConfig) !bool {

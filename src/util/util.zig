@@ -13,6 +13,8 @@ pub const UcnConfig = struct {
     @"setup-command": ?[]const u8 = null,
     @"start-command": []const u8,
     @"stop-command": []const u8,
+    @"readiness-probe": ?[]const u8 = null,
+    @"readiness-timeout": ?u64 = null,
 };
 
 pub fn parseConfig(allocator: std.mem.Allocator) !UcnConfig {
