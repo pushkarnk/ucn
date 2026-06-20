@@ -29,7 +29,7 @@ pub fn parseConfig(allocator: std.mem.Allocator) !UcnConfig {
     return conf_yaml.parse(allocator, UcnConfig);
 }
 
-pub fn runShellCommand(arena: *Arena, cmd: []const []const u8) !bool {
+pub fn runShellCommand(arena: *Arena, cmd: []const []const u8, expected_rc: u8) !void {
     var child = std.process.Child.init(cmd, arena.allocator());
     log.debug("Running command: {s}", .{try std.mem.join(arena.allocator(), " ", cmd)});
 
@@ -44,12 +44,12 @@ pub fn runShellCommand(arena: *Arena, cmd: []const []const u8) !bool {
 
     const term = try child.wait();
     switch (term) {
-        .Exited => |code| if (code != 0) {
+        .Exited => |code| if (code != expected_rc) {
             log.err("Command exited with code {d}", .{code});
             log.err("{s}", .{stderr.items});
-            return false;
+            return error.CommandFailed;
         },
-        else => return false,
+        else => return error.CommandFailed,
     }
-    return true;
+    return;
 }

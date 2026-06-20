@@ -38,8 +38,8 @@ pub fn run(path: []const u8, config: UcnConfig) !void {
 }
 
 fn relaunch(arena: *Arena, name: []const u8, config: UcnConfig) anyerror!void {
-    try dockerExec(arena, name, config, .stop);
-    try dockerExec(arena, name, config, .start);
+    try dockerExec(arena, name, config, .stop, 130);
+    try dockerExec(arena, name, config, .start, 0);
     try waitForReady(arena, config);
 }
 
@@ -53,12 +53,22 @@ fn runInContainerImpl(arena: *Arena, rock_name: []const u8, config: UcnConfig) !
     const version = iter.next().?;
 
     const docker_image = try std.mem.concat(arena.allocator(), u8, &.{ "docker-daemon:", name, ":", version });
-    _ = try util.runShellCommand(arena, &.{ "skopeo", "--insecure-policy", "copy", archive_rock, docker_image });
-    _ = try dockerRun(arena, name, version, config);
-    _ = try dockerExec(arena, name, config, .setup);
-    _ = try dockerExec(arena, name, config, .start);
+    try util.runShellCommand(arena, &.{ "skopeo", "--insecure-policy", "copy", archive_rock, docker_image }, 0);
+    try dockerRun(arena, name, version, config);
+    try dockerExec(arena, name, config, .setup, 0);
+    try dockerExec(arena, name, config, .start, 0);
     try waitForReady(arena, config);
     try watcher.watch(".", relaunch, arena, name, config);
+}
+
+fn stop(config: UcnConfig) !void {
+    var arena = Arena.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const name = config.name;
+    log.info("Stopping container {s}", .{name});
+    try util.runShellCommand(&arena, &.{ "docker", "stop", name }, 0);
+    try util.runShellCommand(&arena, &.{ "docker", "rm", name }, 0);
 }
 
 const default_readiness_timeout_s: u64 = 30;
@@ -98,7 +108,7 @@ fn waitForReady(arena: *Arena, config: UcnConfig) !void {
     return error.ReadinessProbeTimeout;
 }
 
-fn dockerRun(arena: *Arena, name: []const u8, version: []const u8, config: UcnConfig) !bool {
+fn dockerRun(arena: *Arena, name: []const u8, version: []const u8, config: UcnConfig) !void {
     const allocator = arena.allocator();
     const app_name = config.name;
     const docker_image = try std.mem.concat(allocator, u8, &.{ name, ":", version });
@@ -118,10 +128,10 @@ fn dockerRun(arena: *Arena, name: []const u8, version: []const u8, config: UcnCo
     }
 
     try args.appendSlice(allocator, &.{ "--name", app_name, "--network", "host", docker_image });
-    return try util.runShellCommand(arena, args.items);
+    try util.runShellCommand(arena, args.items, 0);
 }
 
-fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Command) !void {
+fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Command, expected_rc: u8) !void {
     const command = switch (cmd) {
         .setup => config.@"setup-command",
         .start => config.@"start-command",
@@ -141,8 +151,8 @@ fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Command) 
     // the foreground so docker exec blocks until they complete, guaranteeing
     // setup-command finishes before start-command begins.
     if (cmd == .start) {
-        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-c", command });
+        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-c", command }, expected_rc);
     } else {
-        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-w", "/app", name, "sh", "-c", command });
+        _ = try util.runShellCommand(arena, &.{ "docker", "exec", "-w", "/app", name, "sh", "-c", command }, expected_rc);
     }
 }

@@ -52,17 +52,17 @@ fn createRuntimePart(config: UcnConfig) !Parts {
     return Parts{ .runtime = part };
 }
 
-fn buildImage(arena: *Arena, sub_path: []const u8, rockcraft: []const u8) !bool {
+fn buildImage(arena: *Arena, sub_path: []const u8, rockcraft: []const u8) !void {
     const conf_path = try std.fs.path.join(std.heap.page_allocator, &.{ sub_path, "rockcraft.yaml" });
     try std.fs.cwd().writeFile(.{ .sub_path = conf_path, .data = rockcraft });
     log.info("Creating rock image using the rockcraft.yaml", .{});
-    return util.runShellCommand(arena, &.{ "rockcraft", "pack" });
+    try util.runShellCommand(arena, &.{ "rockcraft", "pack" }, 0);
 }
 
-pub fn createImage(path: []const u8, config: UcnConfig) !bool {
+pub fn createImage(path: []const u8, config: UcnConfig) !void {
     var arena = Arena.init(std.heap.page_allocator);
     defer arena.deinit();
     log.info("Generating rockcraft.yaml", .{});
     const rockcraft = try createRockcraft(&arena, config);
-    return try buildImage(&arena, path, rockcraft);
+    try buildImage(&arena, path, rockcraft);
 }
