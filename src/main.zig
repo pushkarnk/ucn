@@ -2,6 +2,7 @@ const std = @import("std");
 const imager = @import("imager");
 const runner = @import("runner");
 const util = @import("util");
+const posix = std.posix;
 const Arena = std.heap.ArenaAllocator;
 
 pub const std_options: std.Options = .{
@@ -34,7 +35,6 @@ pub fn main() !void {
     var arena = Arena.init(std.heap.page_allocator);
     defer arena.deinit();
     const config = try util.parseConfig(arena.allocator());
-
-    _ = try imager.createImage(".", config);
-    _ = try runner.run(".", config);
+    try imager.createImage(".", config);
+    try runner.run(".", config);
 }
