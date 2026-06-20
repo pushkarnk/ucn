@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const ucn_mod = b.addModule("ucn", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
