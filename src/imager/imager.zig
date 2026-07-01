@@ -18,6 +18,7 @@ const Rockcraft = struct {
 const Part = struct {
     plugin: ?[]const u8,
     @"stage-packages": ?[]const []const u8,
+    @"stage-snaps": ?[]const []const u8,
 };
 
 const Parts = struct {
@@ -38,16 +39,29 @@ fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
         .summary = config.description,
         .description = config.description,
         .platforms = .{ .amd64 = null },
-        .parts = try createRuntimePart(config),
+        .parts = try createRuntimePart(arena.allocator(), config),
     };
 
     return try serde.yaml.toSlice(arena.allocator(), rockcraft);
 }
 
-fn createRuntimePart(config: UcnConfig) !Parts {
+fn createRuntimePart(allocator: std.mem.Allocator, config: UcnConfig) !Parts {
+    // filter apt packages and snaps from the "runtime-deps" list
+    // by default every entry is an apt package and must go into "stage-packages"
+    // if an entry starts with "snap:", it is a snap package and must go into "stage-snaps"
+    var snap_packages: std.ArrayList([]const u8) = .empty;
+    var apt_packages: std.ArrayList([]const u8) = .empty;
+    for (config.@"runtime-deps") |dep| {
+        if (std.mem.startsWith(u8, dep, "snap:")) {
+            try snap_packages.append(allocator, dep[5..]);
+        } else {
+            try apt_packages.append(allocator, dep);
+        }
+    }
     const part = Part{
         .plugin = "nil",
-        .@"stage-packages" = config.@"runtime-deps",
+        .@"stage-packages" = try apt_packages.toOwnedSlice(allocator),
+        .@"stage-snaps" = try snap_packages.toOwnedSlice(allocator),
     };
     return Parts{ .runtime = part };
 }
