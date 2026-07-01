@@ -4,6 +4,7 @@ const util = @import("util");
 const Arena = std.heap.ArenaAllocator;
 const UcnConfig = util.UcnConfig;
 const log = std.log;
+const SkipMode = serde.SkipMode;
 
 const Rockcraft = struct {
     name: []const u8,
@@ -19,6 +20,12 @@ const Part = struct {
     plugin: ?[]const u8,
     @"stage-packages": ?[]const []const u8,
     @"stage-snaps": ?[]const []const u8,
+
+    pub const serde = .{
+        .skip = .{
+            .@"stage-snaps" = SkipMode.null,
+        },
+    };
 };
 
 const Parts = struct {
@@ -61,7 +68,7 @@ fn createRuntimePart(allocator: std.mem.Allocator, config: UcnConfig) !Parts {
     const part = Part{
         .plugin = "nil",
         .@"stage-packages" = try apt_packages.toOwnedSlice(allocator),
-        .@"stage-snaps" = try snap_packages.toOwnedSlice(allocator),
+        .@"stage-snaps" = if (snap_packages.items.len == 0) null else try snap_packages.toOwnedSlice(allocator),
     };
     return Parts{ .runtime = part };
 }
