@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Maven Sample</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; }
+        input, button { font-size: 1rem; padding: 0.4rem; }
+        pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>Maven Sample Web App</h1>
+    <p>Enter a name and fetch a greeting from the servlet.</p>
+    <input id="name" placeholder="World" />
+    <button onclick="greet()">Greet</button>
+    <pre id="out">// response appears here</pre>
+
+    <script>
+        async function greet() {
+            const name = document.getElementById('name').value;
+            const res = await fetch('api/greeting' + (name ? '?name=' + encodeURIComponent(name) : ''));
+            document.getElementById('out').textContent = JSON.stringify(await res.json(), null, 2);
+        }
+    </script>
+</body>
+</html>

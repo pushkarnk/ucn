@@ -1,2 +1,10 @@
 zig-out
 .zig-cache
+**/target
+**/obj
+**/bin
+rockcraft.yaml
+**/.venv
+**/build
+**/.gradle
+*.rock

@@ -1,0 +1,16 @@
+name: pip-sample
+version: 0.1
+description: A sample pip application
+ubuntu-version: 24.04
+runtime-deps:
+  - python3-pip
+  - python3-venv
+port-forward: 8080
+setup-command: "pip download -d /deps --only-binary :all: fastapi uvicorn httpx pydantic setuptools wheel && python3 -m venv .venv && .venv/bin/pip install -e . --find-links /deps"
+start-command: ".venv/bin/sampleapp"
+stop-command: "pkill -INT -f python3"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 60
+watch:
+  paths: [src/sampleapp]
+  ignore: [src/sampleapp.egg-info]

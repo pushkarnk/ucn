@@ -1,0 +1,17 @@
+name: gradle-sample
+version: 0.1
+description: A sample Gradle Java web application
+ubuntu-version: 24.04
+runtime-deps:
+  - openjdk-17-jdk
+environment:
+  JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+port-forward: 8080
+setup-command: "./gradlew --gradle-user-home /deps --no-daemon build -x test"
+start-command: "./gradlew --gradle-user-home /deps --no-daemon --offline run"
+stop-command: "pkill -INT -f com.example.App"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 120
+watch:
+  paths: [src, build.gradle, settings.gradle]
+  ignore: [build, .gradle]

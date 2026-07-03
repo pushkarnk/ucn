@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: sampleapp
+Version: 0.1.0
+Summary: Minimal sample web service
+Requires-Python: >=3.10
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn>=0.29
+Requires-Dist: httpx>=0.27
+Requires-Dist: pydantic>=2

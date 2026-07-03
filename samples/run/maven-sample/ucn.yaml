@@ -1,0 +1,20 @@
+name: maven-sample
+version: 0.1
+description: A sample Maven Java web application
+ubuntu-version: 24.04
+runtime-deps:
+  - maven
+  - openjdk-17-jdk
+environment:
+  JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+  PATH: /usr/share/maven/bin/:/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  # this ^ is far from desirable, but stage-packages are not installed, they are just unpacked!
+port-forward: 8080
+setup-command: "apt update && apt install -y ca-certificates ca-certificates-java && update-ca-certificates -f"
+start-command: "mvn -B package -DskipTests && java -cp target/maven-sample.jar com.example.App"
+stop-command: "pkill -INT -f com.example.App"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 300
+watch:
+  paths: [src, pom.xml]
+  ignore: [target]
