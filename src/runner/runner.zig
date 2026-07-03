@@ -58,7 +58,7 @@ fn runInContainerImpl(arena: *Arena, rock_name: []const u8, config: UcnConfig) !
     try dockerExec(arena, name, config, .setup, 0);
     try dockerExec(arena, name, config, .start, 0);
     try waitForReady(arena, config);
-    try watcher.watch(".", relaunch, arena, name, config);
+    try watcher.watch(relaunch, arena, name, config);
 }
 
 fn stop(config: UcnConfig) !void {

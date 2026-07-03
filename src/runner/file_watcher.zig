@@ -17,18 +17,26 @@ const mask = linux.IN.CREATE |
 
 const WatchMap = std.AutoHashMapUnmanaged(i32, []const u8);
 
-pub fn watch(path: []const u8, callback: Callback, arena: *Arena, name: []const u8, config: UcnConfig) !void {
+const default_paths: []const []const u8 = &.{"."};
+const empty_ignore: []const []const u8 = &.{};
+
+pub fn watch(callback: Callback, arena: *Arena, name: []const u8, config: UcnConfig) !void {
     const allocator = arena.allocator();
     const fd = try posix.inotify_init1(0);
     defer posix.close(fd);
 
+    const paths = if (config.watch) |w| w.paths else default_paths;
+    const ignore = if (config.watch) |w| w.ignore else empty_ignore;
+
     var watches: WatchMap = .empty;
-    try addWatchRecursive(allocator, fd, path, &watches);
+    for (paths) |path| {
+        try addWatchRecursive(allocator, fd, path, &watches, ignore);
+    }
 
     var buffer: [4096]u8 align(@alignOf(linux.inotify_event)) = undefined;
     const header_len = @sizeOf(linux.inotify_event);
 
-    log.info("Watching {d} directories under {s} for changes", .{ watches.count(), path });
+    log.info("Watching {d} directories for changes", .{watches.count()});
 
     while (true) {
         const n = try posix.read(fd, &buffer);
@@ -48,7 +56,7 @@ pub fn watch(path: []const u8, callback: Callback, arena: *Arena, name: []const 
             else
                 "";
 
-            if (shouldIgnore(file_name)) continue;
+            if (shouldIgnore(file_name, ignore)) continue;
 
             const dir = watches.get(event.wd) orelse "?";
 
@@ -58,7 +66,7 @@ pub fn watch(path: []const u8, callback: Callback, arena: *Arena, name: []const 
                 event.mask & (linux.IN.CREATE | linux.IN.MOVED_TO) != 0)
             {
                 const new_dir = try std.fs.path.join(allocator, &.{ dir, file_name });
-                addWatchRecursive(allocator, fd, new_dir, &watches) catch |err|
+                addWatchRecursive(allocator, fd, new_dir, &watches, ignore) catch |err|
                     log.warn("Failed to watch new directory {s}: {}", .{ new_dir, err });
             }
 
@@ -71,27 +79,32 @@ pub fn watch(path: []const u8, callback: Callback, arena: *Arena, name: []const 
 }
 
 // Adds a watch for `path` and, recursively, for every (non-ignored) directory
-// beneath it.
-fn addWatchRecursive(allocator: std.mem.Allocator, fd: i32, path: []const u8, watches: *WatchMap) !void {
+// beneath it. `path` may also be a regular file, in which case only that file
+// is watched.
+fn addWatchRecursive(allocator: std.mem.Allocator, fd: i32, path: []const u8, watches: *WatchMap, ignore: []const []const u8) !void {
     const wd = try posix.inotify_add_watch(fd, path, mask);
     try watches.put(allocator, wd, try allocator.dupe(u8, path));
 
-    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
-        log.warn("Cannot open {s} for watching: {}", .{ path, err });
-        return;
+    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| switch (err) {
+        // A regular file was watched directly; nothing to recurse into.
+        error.NotDir => return,
+        else => {
+            log.warn("Cannot open {s} for watching: {}", .{ path, err });
+            return;
+        },
     };
     defer dir.close();
 
     var it = dir.iterate();
     while (try it.next()) |entry| {
         if (entry.kind != .directory) continue;
-        if (shouldIgnoreDir(entry.name)) continue;
+        if (shouldIgnoreDir(entry.name, ignore)) continue;
         const sub_path = try std.fs.path.join(allocator, &.{ path, entry.name });
-        try addWatchRecursive(allocator, fd, sub_path, watches);
+        try addWatchRecursive(allocator, fd, sub_path, watches, ignore);
     }
 }
 
-fn shouldIgnore(name: []const u8) bool {
+fn shouldIgnore(name: []const u8, ignore: []const []const u8) bool {
     if (name.len == 0) return true;
     if (name[0] == '.') return true;
     if (name[name.len - 1] == '~') return true;
@@ -100,16 +113,26 @@ fn shouldIgnore(name: []const u8) bool {
         if (!std.ascii.isDigit(c)) break false;
     } else true;
     if (all_digits) return true;
+    if (isIgnored(name, ignore)) return true;
     return false;
 }
 
-fn shouldIgnoreDir(name: []const u8) bool {
+fn shouldIgnoreDir(name: []const u8, ignore: []const []const u8) bool {
     if (name.len == 0) return true;
     if (name[0] == '.') return true;
     if (std.mem.endsWith(u8, name, ".egg-info")) return true;
     const ignored = [_][]const u8{ "__pycache__", "vendor", "deps", "obj", "bin" };
     for (ignored) |d| {
         if (std.mem.eql(u8, name, d)) return true;
+    }
+    if (isIgnored(name, ignore)) return true;
+    return false;
+}
+
+// Whether `name` matches any entry in the user-configured ignore list.
+fn isIgnored(name: []const u8, ignore: []const []const u8) bool {
+    for (ignore) |entry| {
+        if (std.mem.eql(u8, name, entry)) return true;
     }
     return false;
 }

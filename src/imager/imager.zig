@@ -6,14 +6,23 @@ const UcnConfig = util.UcnConfig;
 const log = std.log;
 const SkipMode = serde.SkipMode;
 
+const EnvMap = std.StringArrayHashMapUnmanaged([]const u8);
+
 const Rockcraft = struct {
     name: []const u8,
     base: []const u8,
     version: []const u8,
     summary: []const u8,
     description: []const u8,
+    environment: ?EnvMap,
     platforms: Platform,
     parts: Parts,
+
+    pub const serde = .{
+        .skip = .{
+            .environment = SkipMode.null,
+        },
+    };
 };
 
 const Part = struct {
@@ -45,11 +54,22 @@ fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
         .base = base,
         .summary = config.description,
         .description = config.description,
+        .environment = try createEnvironment(arena.allocator(), config),
         .platforms = .{ .amd64 = null },
         .parts = try createRuntimePart(arena.allocator(), config),
     };
 
     return try serde.yaml.toSlice(arena.allocator(), rockcraft);
+}
+
+fn createEnvironment(allocator: std.mem.Allocator, config: UcnConfig) !?EnvMap {
+    if (config.environment.len == 0) return null;
+
+    var env: EnvMap = .empty;
+    for (config.environment) |v| {
+        try env.put(allocator, v.name, v.value);
+    }
+    return env;
 }
 
 fn createRuntimePart(allocator: std.mem.Allocator, config: UcnConfig) !Parts {
