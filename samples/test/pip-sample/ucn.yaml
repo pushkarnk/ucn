@@ -1,0 +1,18 @@
+name: pip-sample
+version: 0.1
+description: A sample pip Python web application with run and test PyPI dependencies
+ubuntu-version: 24.04
+runtime-deps:
+  - python3-pip
+  - python3-venv
+port-forward: 8080
+# download deps (runtime + test) and run the test suite
+setup-command: "pip download -d /deps --only-binary :all: fastapi uvicorn pydantic setuptools wheel pytest httpx pytest-mock && python3 -m venv .venv && .venv/bin/pip install -e '.[test]' --find-links /deps && .venv/bin/pytest -v"
+# start runs only the web app (runtime packages)
+start-command: ".venv/bin/sampleapp"
+stop-command: "pkill -INT -f python3"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 60
+watch:
+  paths: [src/sampleapp, tests, pyproject.toml]
+  ignore: [src/sampleapp.egg-info, .pytest_cache, .venv]

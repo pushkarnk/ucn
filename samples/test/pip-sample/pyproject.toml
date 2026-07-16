@@ -1,0 +1,31 @@
+[project]
+name = "sampleapp"
+version = "0.1.0"
+description = "A sample pip Python web application with run and test PyPI dependencies"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+sampleapp = "sampleapp.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

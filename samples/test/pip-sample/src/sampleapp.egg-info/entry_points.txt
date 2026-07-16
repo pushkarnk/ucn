@@ -1,0 +1,2 @@
+[console_scripts]
+sampleapp = sampleapp.app:main

@@ -1,0 +1,20 @@
+name: rust-sample
+version: 0.1
+description: A sample Cargo (Rust) web application with run and test Cargo dependencies
+ubuntu-version: 24.04
+runtime-deps:
+  - cargo
+  - rustc
+environment:
+  CARGO_HOME: /deps
+port-forward: 8080
+# download deps (runtime + test) and run the test suite
+setup-command: "apt update && apt install -y ca-certificates gcc && cargo fetch --locked && cargo test --offline -- --nocapture"
+# start runs only the web app (runtime crates)
+start-command: "cargo run --offline"
+stop-command: "pkill -INT -f rust-sample"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 180
+watch:
+  paths: [src, static, tests, Cargo.toml]
+  ignore: [target]

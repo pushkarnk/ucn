@@ -1,0 +1,19 @@
+name: gradle-sample
+version: 0.1
+description: A sample Gradle Java web application with run and test Maven dependencies
+ubuntu-version: 24.04
+runtime-deps:
+  - openjdk-21-jdk
+environment:
+  JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+port-forward: 8080
+# download deps (runtime + test) and run the test suite
+setup-command: "./gradlew --gradle-user-home /deps --no-daemon test"
+# start runs only the web app (runtime packages)
+start-command: "./gradlew --gradle-user-home /deps --no-daemon --offline run"
+stop-command: "pkill -INT -f com.example.App"
+readiness-probe: "curl -fsS http://127.0.0.1:8080/"
+readiness-timeout: 120
+watch:
+  paths: [src, build.gradle, settings.gradle]
+  ignore: [build, .gradle]

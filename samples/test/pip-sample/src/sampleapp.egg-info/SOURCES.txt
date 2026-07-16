@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+src/sampleapp/__init__.py
+src/sampleapp/app.py
+src/sampleapp/models.py
+src/sampleapp.egg-info/PKG-INFO
+src/sampleapp.egg-info/SOURCES.txt
+src/sampleapp.egg-info/dependency_links.txt
+src/sampleapp.egg-info/entry_points.txt
+src/sampleapp.egg-info/requires.txt
+src/sampleapp.egg-info/top_level.txt
+tests/test_app.py
+tests/test_models.py
