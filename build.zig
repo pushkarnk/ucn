@@ -43,6 +43,15 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const tester_mod = b.addModule("tester", .{
+        .root_source_file = b.path("src/tester/tester.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "util", .module = util_mod },
+        },
+    });
+
     const ucn_mod = b.addModule("ucn", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -50,6 +59,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "imager", .module = imager_mod },
             .{ .name = "runner", .module = runner_mod },
+            .{ .name = "tester", .module = tester_mod },
             .{ .name = "util", .module = util_mod },
         },
     });
