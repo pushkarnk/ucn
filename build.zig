@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const yaml_dep = b.dependency("yaml", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const serde_dep = b.dependency("serde", .{
         .target = target,
         .optimize = optimize,
@@ -19,7 +14,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "yaml", .module = yaml_dep.module("yaml") },
+            .{ .name = "serde", .module = serde_dep.module("serde") },
         },
     });
 
@@ -86,7 +81,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run all tests");
 
-    for ([_]*std.Build.Module{ imager_mod, runner_mod, ucn_mod }) |mod| {
+    for ([_]*std.Build.Module{ imager_mod, runner_mod, ucn_mod, util_mod }) |mod| {
         const mod_tests = b.addTest(.{ .root_module = mod });
         const run_mod_tests = b.addRunArtifact(mod_tests);
         test_step.dependOn(&run_mod_tests.step);

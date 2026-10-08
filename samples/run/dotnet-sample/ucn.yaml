@@ -1,13 +1,17 @@
 name: dotnet-sample
-version: 0.1
-description: A sample .NET application
-ubuntu-version: 26.04
+version: "0.1"
+summary: A sample .NET application
+ubuntu-version: "26.04"
+
 runtime-deps:
   - dotnet10
-port-forward: 5000
-start-command: NUGET_PACKAGES=/deps dotnet run
-stop-command: pkill -INT -f dotnet
-readiness-probe: "curl -fsS http://127.0.0.1:5000/"
-readiness-timeout: 60
-watch:
-  paths: ["."]
+
+run:
+  start-command: NUGET_PACKAGES=/deps dotnet run
+  stop-command: pkill -INT -f dotnet
+  port-forward: "5000"
+  readiness:
+    probe: curl -fsS http://127.0.0.1:5000/
+    timeout: 60
+  watch:
+    paths: ["."]

@@ -125,8 +125,8 @@ fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
         .name = config.name,
         .version = config.version,
         .base = base,
-        .summary = config.description,
-        .description = .{ .data = config.description },
+        .summary = config.summary,
+        .description = .{ .data = config.summary },
         .environment = try createEnvironment(arena.allocator(), config),
         .platforms = .{ .amd64 = null },
         .parts = try createRuntimePart(arena.allocator(), config),
@@ -136,9 +136,10 @@ fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
 }
 
 fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
+    const test_config = config.@"test" orelse return error.InvalidArguments;
     const url = rockcraft_directory.getRockcraftUrl(
-        config.toolchain.?, //fail if toolchain is null, since we can't create a test rockcraft without it
-        config.@"toolchain-version".?, //fail if toolchain-version is null, since we can't create a test rockcraft without it
+        test_config.toolchain.?, //fail if toolchain is null, since we can't create a test rockcraft without it
+        test_config.@"toolchain-version".?, //fail if toolchain-version is null, since we can't create a test rockcraft without it
         config.@"ubuntu-version",
     ) orelse return error.InvalidArguments;
 
@@ -182,12 +183,12 @@ fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
     else
         base_script;
 
-    const override_build: ?YamlBlockString = if (config.@"test-command") |cmd|
+    const override_build: ?YamlBlockString = if (test_config.@"test-command") |cmd|
         .{ .data = try std.mem.concat(arena.allocator(), u8, &.{ cmd, "\ncraftctl default\n", organize_script }) }
     else
         .{ .data = try std.mem.concat(arena.allocator(), u8, &.{ "craftctl default\n", organize_script }) };
 
-    const build_packages: ?[]const []const u8 = config.@"build-deps";
+    const build_packages: ?[]const []const u8 = test_config.@"build-deps";
 
     try rockcraft.parts.put(arena.allocator(), "app", .{
         .plugin = "dump",
@@ -196,11 +197,11 @@ fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
         .@"override-build" = override_build,
     });
 
-    if (config.environment.len > 0) {
+    if (config.environment.vars.len > 0) {
         if (rockcraft.environment == null) {
             rockcraft.environment = .empty;
         }
-        for (config.environment) |v| {
+        for (config.environment.vars) |v| {
             try rockcraft.environment.?.put(arena.allocator(), v.name, v.value);
         }
     }
@@ -210,10 +211,10 @@ fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
 }
 
 fn createEnvironment(allocator: std.mem.Allocator, config: UcnConfig) !?EnvMap {
-    if (config.environment.len == 0) return null;
+    if (config.environment.vars.len == 0) return null;
 
     var env: EnvMap = .empty;
-    for (config.environment) |v| {
+    for (config.environment.vars) |v| {
         try env.put(allocator, v.name, v.value);
     }
     return env;

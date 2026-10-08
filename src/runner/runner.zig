@@ -72,10 +72,11 @@ fn probeSucceeds(arena: *Arena, command: []const u8) bool {
 }
 
 fn waitForReady(arena: *Arena, config: UcnConfig) !void {
-    const command = config.@"readiness-probe" orelse return;
+    const readiness = config.run.readiness orelse return;
+    const command = readiness.probe;
     if (command.len == 0) return;
 
-    const timeout_s = config.@"readiness-timeout" orelse default_readiness_timeout_s;
+    const timeout_s = readiness.timeout orelse default_readiness_timeout_s;
     log.info("Waiting up to {d}s for readiness probe: {s}", .{ timeout_s, command });
 
     var elapsed: u64 = 0;

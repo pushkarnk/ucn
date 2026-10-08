@@ -1,5 +1,5 @@
 const std = @import("std");
-const Yaml = @import("yaml").Yaml;
+const serde = @import("serde");
 const Arena = std.heap.ArenaAllocator;
 const log = std.log;
 
@@ -15,24 +15,52 @@ pub const EnvVar = struct {
     value: []const u8,
 };
 
-pub const UcnConfig = struct {
-    name: []const u8,
-    version: []const u8,
-    description: []const u8,
-    @"ubuntu-version": []const u8,
+// Arbitrary-keyed `environment` map, deserialized by hand since serde has no
+// hash map support.
+pub const EnvVars = struct {
+    vars: []const EnvVar = &.{},
+
+    pub fn zerdeDeserialize(comptime _: type, allocator: std.mem.Allocator, deserializer: anytype) @TypeOf(deserializer.*).Error!@This() {
+        var access = try deserializer.deserializeStruct(void);
+        var vars: std.ArrayListUnmanaged(EnvVar) = .empty;
+        while (try access.nextKey(allocator)) |key| {
+            const value = try access.nextValue([]const u8, allocator);
+            try vars.append(allocator, .{ .name = key, .value = value });
+        }
+        return .{ .vars = vars.items };
+    }
+};
+
+pub const ReadinessConfig = struct {
+    probe: []const u8,
+    timeout: ?u64 = null,
+};
+
+pub const RunConfig = struct {
+    @"setup-command": ?[]const u8 = null,
+    @"start-command": []const u8,
+    @"stop-command": []const u8,
+    @"port-forward": ?[]const u8 = null,
+    readiness: ?ReadinessConfig = null,
+    watch: ?WatchConfig = null,
+};
+
+pub const TestConfig = struct {
     toolchain: ?[]const u8 = null,
     @"toolchain-version": ?[]const u8 = null,
     @"build-deps": ?[]const []const u8 = null,
-    @"runtime-deps": []const []const u8,
-    @"port-forward": ?[]const u8 = null,
-    @"setup-command": ?[]const u8 = null,
     @"test-command": ?[]const u8 = null,
-    @"start-command": []const u8,
-    @"stop-command": []const u8,
-    @"readiness-probe": ?[]const u8 = null,
-    @"readiness-timeout": ?u64 = null,
-    watch: ?WatchConfig = null,
-    environment: []const EnvVar = &.{},
+};
+
+pub const UcnConfig = struct {
+    name: []const u8,
+    version: []const u8,
+    summary: []const u8,
+    @"ubuntu-version": []const u8,
+    @"runtime-deps": []const []const u8,
+    environment: EnvVars = .{},
+    run: RunConfig,
+    @"test": ?TestConfig = null,
 };
 
 pub fn parseConfig(allocator: std.mem.Allocator) !UcnConfig {
@@ -41,35 +69,46 @@ pub fn parseConfig(allocator: std.mem.Allocator) !UcnConfig {
 
     const conf_data = try conf_file.readToEndAlloc(allocator, 8192);
 
-    var conf_yaml: Yaml = .{ .source = conf_data };
-    try conf_yaml.load(allocator);
-
-    // The YAML library's struct parser can't map an arbitrary-keyed mapping
-    // onto a Zig type, so pull `environment` out of the document (removing it so
-    // the struct parser falls back to the default) and build the list ourselves.
-    const environment = extractEnvironment(allocator, &conf_yaml) catch &.{};
-
-    var config = try conf_yaml.parse(allocator, UcnConfig);
-    config.environment = environment;
-    return config;
+    return parseConfigSlice(allocator, conf_data);
 }
 
-fn extractEnvironment(allocator: std.mem.Allocator, yaml: *Yaml) ![]const EnvVar {
-    if (yaml.docs.items.len == 0) return &.{};
-    const root = &yaml.docs.items[0];
-    if (root.* != .map) return &.{};
+fn parseConfigSlice(allocator: std.mem.Allocator, data: []const u8) !UcnConfig {
+    return try serde.yaml.fromSlice(UcnConfig, allocator, data);
+}
 
-    const entry = root.map.fetchSwapRemove("environment") orelse return &.{};
-    const env_map = switch (entry.value) {
-        .map => |m| m,
-        else => return &.{},
-    };
+test parseConfigSlice {
+    const yaml =
+        \\name: demo
+        \\version: "0.1"
+        \\summary: demo app
+        \\ubuntu-version: "24.04"
+        \\runtime-deps: [cargo]
+        \\environment:
+        \\  CARGO_HOME: /deps
+        \\run:
+        \\  setup-command: |
+        \\    apt update
+        \\    cargo fetch --locked
+        \\  start-command: cargo run
+        \\  stop-command: pkill cargo
+        \\  port-forward: "8080"
+        \\  readiness:
+        \\    probe: curl -fsS http://127.0.0.1:8080/
+        \\    timeout: 120
+        \\test:
+        \\  test-command: cargo test
+    ;
 
-    const vars = try allocator.alloc(EnvVar, env_map.count());
-    for (env_map.keys(), env_map.values(), 0..) |key, value, i| {
-        vars[i] = .{ .name = key, .value = value.asScalar() orelse "" };
-    }
-    return vars;
+    var arena = Arena.init(std.testing.allocator);
+    defer arena.deinit();
+    const config = try parseConfigSlice(arena.allocator(), yaml);
+
+    try std.testing.expectEqualStrings("demo", config.name);
+    try std.testing.expectEqualStrings("apt update\ncargo fetch --locked\n", config.run.@"setup-command".?);
+    try std.testing.expectEqualStrings("cargo run", config.run.@"start-command");
+    try std.testing.expectEqual(@as(u64, 120), config.run.readiness.?.timeout.?);
+    try std.testing.expectEqualStrings("/deps", config.environment.vars[0].value);
+    try std.testing.expectEqualStrings("cargo test", config.@"test".?.@"test-command".?);
 }
 
 pub fn runShellCommand(arena: *Arena, cmd: []const []const u8, expected_rc: u8) !void {
@@ -134,7 +173,7 @@ pub fn dockerRun(arena: *Arena, container_name: []const u8, name: []const u8, ve
     var args: std.ArrayListUnmanaged([]const u8) = .empty;
     try args.appendSlice(allocator, &.{ "docker", "run", "-d", "--init", "-v", volume_arg });
 
-    if (config.@"port-forward") |port_forward| {
+    if (config.run.@"port-forward") |port_forward| {
         const port_arg = try std.mem.concat(allocator, u8, &.{ port_forward, ":", port_forward });
         try args.appendSlice(allocator, &.{ "-p", port_arg });
         log.info("Starting container {s} with port forwarding for port {s}", .{ docker_image, port_forward });
@@ -148,10 +187,10 @@ pub fn dockerRun(arena: *Arena, container_name: []const u8, name: []const u8, ve
 
 pub fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Command, expected_rc: u8) !void {
     const command = switch (cmd) {
-        .setup => config.@"setup-command",
-        .start => config.@"start-command",
-        .stop => config.@"stop-command",
-        .test_cmd => config.@"test-command",
+        .setup => config.run.@"setup-command",
+        .start => config.run.@"start-command",
+        .stop => config.run.@"stop-command",
+        .test_cmd => if (config.@"test") |t| t.@"test-command" else null,
     } orelse "";
 
     if (command.len == 0) {
@@ -177,9 +216,10 @@ pub fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Comma
     // Only the long-running start command is detached. setup (and stop) run in
     // the foreground so docker exec blocks until they complete, guaranteeing
     // setup-command finishes before start-command begins.
+    // `sh -e` keeps multi-line (block scalar) commands fail-fast like `&&` chains.
     if (cmd == .start) {
-        _ = try runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-c", command }, expected_rc);
+        _ = try runShellCommand(arena, &.{ "docker", "exec", "-d", "-w", "/app", name, "sh", "-e", "-c", command }, expected_rc);
     } else {
-        _ = try runShellCommand(arena, &.{ "docker", "exec", "-w", "/app", name, "sh", "-c", command }, expected_rc);
+        _ = try runShellCommand(arena, &.{ "docker", "exec", "-w", "/app", name, "sh", "-e", "-c", command }, expected_rc);
     }
 }

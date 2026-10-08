@@ -25,8 +25,8 @@ pub fn watch(callback: Callback, arena: *Arena, name: []const u8, config: UcnCon
     const fd = try posix.inotify_init1(0);
     defer posix.close(fd);
 
-    const paths = if (config.watch) |w| w.paths else default_paths;
-    const ignore = if (config.watch) |w| w.ignore else empty_ignore;
+    const paths = if (config.run.watch) |w| w.paths else default_paths;
+    const ignore = if (config.run.watch) |w| w.ignore else empty_ignore;
 
     var watches: WatchMap = .empty;
     for (paths) |path| {
