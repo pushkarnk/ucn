@@ -24,3 +24,10 @@ run:
   watch:
     paths: [src/sampleapp, tests, pyproject.toml]
     ignore: [src/sampleapp.egg-info, .pytest_cache, .venv]
+
+test:
+  toolchain: python
+  toolchain-version: "3.12"
+  # the venv is created by setup-command and installed with --find-links /deps,
+  # so pytest runs from cached dependencies only; requires the run flow first
+  test-command: .venv/bin/pytest -v

@@ -27,3 +27,13 @@ run:
   watch:
     paths: [src, static, tests, Cargo.toml]
     ignore: [target]
+
+test:
+  toolchain: rust
+  toolchain-version: "1.75"
+  build-deps:
+    - gcc
+    - ca-certificates
+  # CARGO_HOME=/deps (above) is the crate cache; cargo reuses it without
+  # re-downloading, so tests run from cached dependencies only
+  test-command: cargo test

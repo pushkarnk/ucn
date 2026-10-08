@@ -22,3 +22,11 @@ run:
   watch:
     paths: [src, build.gradle, settings.gradle]
     ignore: [build, .gradle]
+
+test:
+  toolchain: java
+  toolchain-version: "21"
+  build-deps:
+    - openjdk-21-jdk-headless
+  # --gradle-user-home /deps points Gradle at the dependency cache
+  test-command: ./gradlew --gradle-user-home /deps --no-daemon test

@@ -31,3 +31,13 @@ run:
   watch:
     paths: [src, pom.xml]
     ignore: [target]
+
+test:
+  toolchain: java
+  toolchain-version: "17"
+  build-deps:
+    - maven
+    - ca-certificates
+    - ca-certificates-java
+  # -Dmaven.repo.local=/deps points Maven at the dependency cache
+  test-command: mvn -B -Dmaven.repo.local=/deps test
