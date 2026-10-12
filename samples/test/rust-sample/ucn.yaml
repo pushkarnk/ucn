@@ -2,19 +2,34 @@ name: rust-sample
 version: "0.1"
 summary: A sample Cargo (Rust) web application with run and test Cargo dependencies
 ubuntu-version: "24.04"
+toolchain: rust
+toolchain-version: "1.75"
 
 runtime-deps:
   - cargo
   - rustc
+  # cargo links test/app binaries in the container
+  - gcc
+  # cargo dep wrongly skipped by stage-packages resolution (it is installed in
+  # the rockcraft build instance, so apt doesn't fetch it, but it is NOT in
+  # the ubuntu:24.04 base image); explicit listing force-fetches it
+  - libgit2-1.7
 
 environment:
   CARGO_HOME: /deps
+  # /app is the host-mounted repo; keep cargo's root-owned build artifacts out
+  # of it or the next rockcraft pack fails copying them
+  CARGO_TARGET_DIR: /tmp/target
+  # staged debs don't run postinst, so the /usr/bin/cc alternative symlink is
+  # missing; point rustc's linker driver at gcc directly
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: gcc
 
 run:
-  # download deps (runtime + test) and run the test suite
+  # download deps (runtime + test) and run the test suite; the cargo deb is
+  # installed for rustdoc, which the chiseled cargo_cargo slice doesn't ship
   setup-command: |
     apt update
-    apt install -y ca-certificates gcc
+    apt install -y ca-certificates gcc cargo
     cargo fetch --locked
     cargo test --offline -- --nocapture
   # start runs only the web app (runtime crates)
@@ -29,11 +44,12 @@ run:
     ignore: [target]
 
 test:
-  toolchain: rust
-  toolchain-version: "1.75"
+  # the staged runtime-deps give the full toolchain at build time; only
+  # ca-certificates must be a real build-package (staged debs skip postinst,
+  # so their CA bundle is never assembled for the crates.io fetch)
   build-deps:
-    - gcc
     - ca-certificates
-  # CARGO_HOME=/deps (above) is the crate cache; cargo reuses it without
-  # re-downloading, so tests run from cached dependencies only
+  # CARGO_HOME=/deps (above) is the crate cache: the build populates it
+  # (online) and bakes it into the image, so the test container reuses it
+  # without re-downloading
   test-command: cargo test

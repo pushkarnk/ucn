@@ -2,6 +2,8 @@ name: maven-sample
 version: "0.1"
 summary: A sample Maven Java web application with run and test Maven dependencies
 ubuntu-version: "24.04"
+toolchain: java
+toolchain-version: "17"
 
 runtime-deps:
   - maven
@@ -33,8 +35,6 @@ run:
     ignore: [target]
 
 test:
-  toolchain: java
-  toolchain-version: "17"
   build-deps:
     - maven
     - ca-certificates

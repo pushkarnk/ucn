@@ -2,18 +2,24 @@ name: pip-sample
 version: "0.1"
 summary: A sample pip Python web application with run and test PyPI dependencies
 ubuntu-version: "24.04"
+toolchain: python
+toolchain-version: "3.12"
 
 runtime-deps:
   - python3-pip
   - python3-venv
 
+environment:
+  # test image: deps baked into /deps/site; relative src resolves against the
+  # build dir at pack time and /app (docker exec -w) at `ucn test` time; src
+  # first so the live source shadows the copy pip --target bakes into /deps/site
+  PYTHONPATH: src:/deps/site
+
 run:
-  # download deps (runtime + test) and run the test suite
   setup-command: |
     pip download -d /deps --only-binary :all: fastapi uvicorn pydantic setuptools wheel pytest httpx pytest-mock
     python3 -m venv .venv
     .venv/bin/pip install -e '.[test]' --find-links /deps
-    .venv/bin/pytest -v
   # start runs only the web app (runtime packages)
   start-command: .venv/bin/sampleapp
   stop-command: pkill -INT -f python3
@@ -26,8 +32,7 @@ run:
     ignore: [src/sampleapp.egg-info, .pytest_cache, .venv]
 
 test:
-  toolchain: python
-  toolchain-version: "3.12"
-  # the venv is created by setup-command and installed with --find-links /deps,
-  # so pytest runs from cached dependencies only; requires the run flow first
-  test-command: .venv/bin/pytest -v
+  # build-time only: install deps into the baked /deps cache
+  setup-command: python3 -m pip install --target /deps/site '.[test]'
+  # no shell in the test container: keep this a single command
+  test-command: python3 -m pytest -v

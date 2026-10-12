@@ -2,6 +2,8 @@ name: gradle-sample
 version: "0.1"
 summary: A sample Gradle Java web application with run and test Maven dependencies
 ubuntu-version: "24.04"
+toolchain: java
+toolchain-version: "21"
 
 runtime-deps:
   - openjdk-21-jdk
@@ -24,8 +26,6 @@ run:
     ignore: [build, .gradle]
 
 test:
-  toolchain: java
-  toolchain-version: "21"
   build-deps:
     - openjdk-21-jdk-headless
   # --gradle-user-home /deps points Gradle at the dependency cache

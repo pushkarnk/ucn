@@ -8,3 +8,4 @@ rockcraft.yaml
 **/build
 **/.gradle
 *.rock
+*__pycache__*

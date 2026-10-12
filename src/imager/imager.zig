@@ -118,30 +118,13 @@ const Platform = struct {
     amd64: ?[]const u8,
 };
 
-fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
-    const base = try std.mem.concat(arena.allocator(), u8, &.{ "ubuntu@", config.@"ubuntu-version" });
-
-    const rockcraft = Rockcraft{
-        .name = config.name,
-        .version = config.version,
-        .base = base,
-        .summary = config.summary,
-        .description = .{ .data = config.summary },
-        .environment = try createEnvironment(arena.allocator(), config),
-        .platforms = .{ .amd64 = null },
-        .parts = try createRuntimePart(arena.allocator(), config),
-    };
-
-    return try serde.yaml.toSlice(arena.allocator(), rockcraft);
-}
-
-fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
-    const test_config = config.@"test" orelse return error.InvalidArguments;
-    const url = rockcraft_directory.getRockcraftUrl(
-        test_config.toolchain.?, //fail if toolchain is null, since we can't create a test rockcraft without it
-        test_config.@"toolchain-version".?, //fail if toolchain-version is null, since we can't create a test rockcraft without it
-        config.@"ubuntu-version",
-    ) orelse return error.InvalidArguments;
+// Both run and test images are the chiseled toolchain rock with an injected
+// app part; the test image additionally stages the full runtime-deps toolchain
+// and runs the test-command at build time.
+fn fetchToolchainRockcraft(arena: *Arena, config: UcnConfig) !Rockcraft {
+    const toolchain = config.toolchain orelse return error.InvalidArguments;
+    const toolchain_version = config.@"toolchain-version" orelse return error.InvalidArguments;
+    const url = rockcraft_directory.getRockcraftUrl(toolchain, toolchain_version, config.@"ubuntu-version") orelse return error.InvalidArguments;
 
     var client: std.http.Client = .{ .allocator = arena.allocator() };
     defer client.deinit();
@@ -156,17 +139,20 @@ fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
     if (result.status != .ok) return error.HttpRequestFailed;
 
     const yaml = try body.toOwnedSlice();
-    var rockcraft = try serde.yaml.fromSlice(Rockcraft, arena.allocator(), yaml);
+    return try serde.yaml.fromSlice(Rockcraft, arena.allocator(), yaml);
+}
 
-    // TODO: why does this change fail rockcraft pack?
-    //rockcraft.name = try std.fmt.allocPrint(arena.allocator(), "{s}-{s}-test", .{ config.name, rockcraft.name });
-    //rockcraft.version = config.version;
+fn mergeEnvironment(allocator: std.mem.Allocator, rockcraft: *Rockcraft, config: UcnConfig) !void {
+    if (config.environment.vars.len == 0) return;
+    if (rockcraft.environment == null) rockcraft.environment = .empty;
+    for (config.environment.vars) |v| {
+        try rockcraft.environment.?.put(allocator, v.name, v.value);
+    }
+}
 
-    const chown_target: ?[]const u8 = if (rockcraft.@"run-user") |user|
-        if (std.mem.eql(u8, user, "_daemon_")) "584792" else user
-    else
-        null;
-
+// Moves the dumped app files into app-orig (deps cache stays at the root),
+// chowned to the rock's run-user if it has one.
+fn organizeScript(arena: *Arena, rockcraft: Rockcraft) ![]const u8 {
     const base_script =
         \\rm -f "$CRAFT_PART_INSTALL"/*.rock "$CRAFT_PART_INSTALL"/*.yaml
         \\mkdir -p "$CRAFT_PART_INSTALL/app-orig"
@@ -178,76 +164,145 @@ fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
         \\  mv "$_f" "$CRAFT_PART_INSTALL/app-orig/"
         \\done
     ;
-    const organize_script = if (chown_target) |u|
-        try std.fmt.allocPrint(arena.allocator(), "{s}\nchown -R {s}:{s} \"$CRAFT_PART_INSTALL/app-orig\"", .{ base_script, u, u })
+
+    const chown_target: ?[]const u8 = if (rockcraft.@"run-user") |user|
+        if (std.mem.eql(u8, user, "_daemon_")) "584792" else user
     else
-        base_script;
+        null;
 
-    const override_build: ?YamlBlockString = if (test_config.@"test-command") |cmd|
-        .{ .data = try std.mem.concat(arena.allocator(), u8, &.{ cmd, "\ncraftctl default\n", organize_script }) }
-    else
-        .{ .data = try std.mem.concat(arena.allocator(), u8, &.{ "craftctl default\n", organize_script }) };
-
-    const build_packages: ?[]const []const u8 = test_config.@"build-deps";
-
-    try rockcraft.parts.put(arena.allocator(), "app", .{
-        .plugin = "dump",
-        .source = ".",
-        .@"build-packages" = build_packages,
-        .@"override-build" = override_build,
-    });
-
-    if (config.environment.vars.len > 0) {
-        if (rockcraft.environment == null) {
-            rockcraft.environment = .empty;
-        }
-        for (config.environment.vars) |v| {
-            try rockcraft.environment.?.put(arena.allocator(), v.name, v.value);
-        }
-    }
-
-    const rockcraft_yaml = try serde.yaml.toSlice(arena.allocator(), rockcraft);
-    return rockcraft_yaml;
+    if (chown_target) |u|
+        return try std.fmt.allocPrint(arena.allocator(), "{s}\nchown -R {s}:{s} \"$CRAFT_PART_INSTALL/app-orig\"", .{ base_script, u, u });
+    return base_script;
 }
 
-fn createEnvironment(allocator: std.mem.Allocator, config: UcnConfig) !?EnvMap {
-    if (config.environment.vars.len == 0) return null;
-
-    var env: EnvMap = .empty;
-    for (config.environment.vars) |v| {
-        try env.put(allocator, v.name, v.value);
-    }
-    return env;
-}
-
-fn createRuntimePart(allocator: std.mem.Allocator, config: UcnConfig) !Parts {
-    // filter apt packages and snaps from the "runtime-deps" list
-    // by default every entry is an apt package and must go into "stage-packages"
-    // if an entry starts with "snap:", it is a snap package and must go into "stage-snaps"
+// split runtime-deps into apt packages (stage-packages) and snap: entries
+// (stage-snaps)
+fn splitDeps(allocator: std.mem.Allocator, deps: []const []const u8) !struct { apt: []const []const u8, snaps: ?[]const []const u8 } {
     var snap_packages: std.ArrayList([]const u8) = .empty;
     var apt_packages: std.ArrayList([]const u8) = .empty;
-    for (config.@"runtime-deps") |dep| {
+    for (deps) |dep| {
         if (std.mem.startsWith(u8, dep, "snap:")) {
             try snap_packages.append(allocator, dep[5..]);
         } else {
             try apt_packages.append(allocator, dep);
         }
     }
-    const part = Part{
-        .plugin = "nil",
-        .@"stage-packages" = try apt_packages.toOwnedSlice(allocator),
-        .@"stage-snaps" = if (snap_packages.items.len == 0) null else try snap_packages.toOwnedSlice(allocator),
+    return .{
+        .apt = try apt_packages.toOwnedSlice(allocator),
+        .snaps = if (snap_packages.items.len == 0) null else try snap_packages.toOwnedSlice(allocator),
     };
-    var parts: Parts = .empty;
-    try parts.put(allocator, "runtime", part);
-    return parts;
+}
+
+// Run image: chiseled toolchain rock + app source. The chiseled rocks have no
+// shell, but setup/start/stop commands run via `sh -c`, so stage dash and
+// link it to sh.
+fn createRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
+    var rockcraft = try fetchToolchainRockcraft(arena, config);
+    try mergeEnvironment(arena.allocator(), &rockcraft, config);
+
+    const override_build: ?YamlBlockString = .{ .data = try std.mem.concat(arena.allocator(), u8, &.{
+        "craftctl default\n",
+        try organizeScript(arena, rockcraft),
+        \\
+        \\mkdir -p "$CRAFT_PART_INSTALL/usr/bin"
+        \\ln -sf dash "$CRAFT_PART_INSTALL/usr/bin/sh"
+    }) };
+
+    const after = try arena.allocator().dupe([]const u8, rockcraft.parts.keys());
+    try rockcraft.parts.put(arena.allocator(), "app", .{
+        .plugin = "dump",
+        .source = ".",
+        .after = after,
+        .@"stage-packages" = &.{"dash"},
+        .@"override-build" = override_build,
+    });
+
+    return try serde.yaml.toSlice(arena.allocator(), rockcraft);
+}
+
+// Test image: same as the run image, but with the full deb toolchain from
+// runtime-deps staged in (the chisel slices ship binaries without their libs,
+// rustdoc, etc.), the /deps cache baked at build time, and the test-command
+// as a build-time gate.
+fn createTestRockcraft(arena: *Arena, config: UcnConfig) ![]const u8 {
+    const test_config = config.@"test" orelse return error.InvalidArguments;
+
+    var rockcraft = try fetchToolchainRockcraft(arena, config);
+    rockcraft.name = try std.mem.concat(arena.allocator(), u8, &.{ config.name, "-test" });
+    rockcraft.version = config.version;
+    try mergeEnvironment(arena.allocator(), &rockcraft, config);
+
+    // The full toolchain goes in its own part so the app part's organize
+    // script never relocates it into app-orig.
+    const deps = try splitDeps(arena.allocator(), config.@"runtime-deps");
+    try rockcraft.parts.put(arena.allocator(), "test-runtime", .{
+        .plugin = "nil",
+        .after = try arena.allocator().dupe([]const u8, rockcraft.parts.keys()),
+        .@"stage-packages" = deps.apt,
+        .@"stage-snaps" = deps.snaps,
+        // debs regenerate files the chiseled parts already stage (e.g.
+        // ca-certificates.crt); drop overlaps so staging doesn't conflict
+        .@"override-build" = .{ .data =
+        \\craftctl default
+        \\cd "$CRAFT_PART_INSTALL"
+        \\# usrmerge: the base stages lib, bin, ... as symlinks into usr/, but
+        \\# debs may still ship real top-level dirs; fold them in to match
+        \\for d in bin sbin lib lib32 lib64; do
+        \\  if [ -d "$d" ] && [ ! -L "$d" ] && [ -L "$CRAFT_STAGE/$d" ]; then
+        \\    mkdir -p "usr/$d" && cp -a "$d/." "usr/$d/" && rm -rf "$d"
+        \\  fi
+        \\done
+        \\find . ! -type d | while read -r f; do
+        \\  if [ -e "$CRAFT_STAGE/$f" ] || [ -L "$CRAFT_STAGE/$f" ]; then rm -f "$f"; fi
+        \\done
+        },
+    });
+
+    // rockcraft's top-level `environment` only applies at runtime, so export
+    // the vars for the build scriptlet as well. The /deps dependency cache
+    // (CARGO_HOME=/deps and friends) is written to the instance root during
+    // the build; move it into the part install so it ships in the image and
+    // the test container can run offline.
+    var prefix: std.Io.Writer.Allocating = .init(arena.allocator());
+    for (config.environment.vars) |v| {
+        // keep craft's PATH (craftctl, staged bins) reachable behind the user's
+        const tail = if (std.mem.eql(u8, v.name, "PATH")) ":$PATH" else "";
+        try prefix.writer.print("export {s}={s}{s}\n", .{ v.name, v.value, tail });
+    }
+    // craft-parts puts staged binaries on PATH for build scriptlets but never
+    // sets LD_LIBRARY_PATH, so shared libs staged by earlier parts wouldn't
+    // load at build time
+    try prefix.writer.writeAll("export LD_LIBRARY_PATH=\"$CRAFT_STAGE/usr/lib/$(uname -m)-linux-gnu:$CRAFT_STAGE/usr/lib:$CRAFT_STAGE/lib/$(uname -m)-linux-gnu:$CRAFT_STAGE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n");
+
+    const test_cmd = test_config.@"test-command" orelse "true";
+    const override_build: ?YamlBlockString = .{ .data = try std.mem.concat(arena.allocator(), u8, &.{
+        prefix.written(),
+        test_config.@"setup-command" orelse "",
+        "\n",
+        test_cmd,
+        // dump first, then merge the cache over it: a project that itself has a
+        // deps/ dir would otherwise collide with the moved cache in craftctl default
+        "\ncraftctl default\nif [ -d /deps ]; then mkdir -p \"$CRAFT_PART_INSTALL/deps\" && cp -a /deps/. \"$CRAFT_PART_INSTALL/deps/\"; fi\n",
+        try organizeScript(arena, rockcraft),
+    }) };
+
+    try rockcraft.parts.put(arena.allocator(), "app", .{
+        .plugin = "dump",
+        .source = ".",
+        .after = try arena.allocator().dupe([]const u8, rockcraft.parts.keys()),
+        .@"build-packages" = test_config.@"build-deps",
+        .@"override-build" = override_build,
+    });
+
+    return try serde.yaml.toSlice(arena.allocator(), rockcraft);
 }
 
 fn buildImage(arena: *Arena, sub_path: []const u8, rockcraft: []const u8) !void {
     const conf_path = try std.fs.path.join(std.heap.page_allocator, &.{ sub_path, "rockcraft.yaml" });
     try std.fs.cwd().writeFile(.{ .sub_path = conf_path, .data = rockcraft });
     log.info("Creating rock image using the rockcraft.yaml", .{});
-    try util.runShellCommand(arena, &.{ "rockcraft", "pack" }, 0);
+    // streamed: pack output (pip/cargo/test logs) easily exceeds the 1 MiB capture cap
+    try util.runShellCommandStreamed(arena, &.{ "rockcraft", "pack" }, 0);
 }
 
 pub fn createImage(path: []const u8, config: UcnConfig) !void {

@@ -10,6 +10,9 @@ pub fn runTests(config: util.UcnConfig) !void {
     const image_name = try std.mem.concat(arena.allocator(), u8, &.{ config.name, "-test" });
     if (!util.dockerContainerExists(&arena, container_name)) {
         try util.dockerRun(&arena, container_name, image_name, config.version, config);
+    } else {
+        // container may have exited (e.g. host reboot); start is a no-op if running
+        try util.runShellCommand(&arena, &.{ "docker", "start", container_name }, 0);
     }
     try util.dockerExec(&arena, container_name, config, .test_cmd, 0);
 }

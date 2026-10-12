@@ -46,9 +46,9 @@ pub const RunConfig = struct {
 };
 
 pub const TestConfig = struct {
-    toolchain: ?[]const u8 = null,
-    @"toolchain-version": ?[]const u8 = null,
     @"build-deps": ?[]const []const u8 = null,
+    // runs only in the image build scriptlet (has a shell), before test-command
+    @"setup-command": ?[]const u8 = null,
     @"test-command": ?[]const u8 = null,
 };
 
@@ -57,6 +57,8 @@ pub const UcnConfig = struct {
     version: []const u8,
     summary: []const u8,
     @"ubuntu-version": []const u8,
+    toolchain: ?[]const u8 = null,
+    @"toolchain-version": ?[]const u8 = null,
     @"runtime-deps": []const []const u8,
     environment: EnvVars = .{},
     run: RunConfig,
@@ -109,6 +111,19 @@ test parseConfigSlice {
     try std.testing.expectEqual(@as(u64, 120), config.run.readiness.?.timeout.?);
     try std.testing.expectEqualStrings("/deps", config.environment.vars[0].value);
     try std.testing.expectEqualStrings("cargo test", config.@"test".?.@"test-command".?);
+}
+
+/// Like runShellCommand, but the child writes straight to the host terminal.
+pub fn runShellCommandStreamed(arena: *Arena, cmd: []const []const u8, expected_rc: u8) !void {
+    var child = std.process.Child.init(cmd, arena.allocator());
+    log.debug("Running command: {s}", .{try std.mem.join(arena.allocator(), " ", cmd)});
+    switch (try child.spawnAndWait()) {
+        .Exited => |code| if (code != expected_rc) {
+            log.err("Command exited with code {d}", .{code});
+            return error.CommandFailed;
+        },
+        else => return error.CommandFailed,
+    }
 }
 
 pub fn runShellCommand(arena: *Arena, cmd: []const []const u8, expected_rc: u8) !void {
@@ -209,7 +224,7 @@ pub fn dockerExec(arena: *Arena, name: []const u8, config: UcnConfig, cmd: Comma
         try args.appendSlice(arena.allocator(), &.{ "docker", "exec", "-u", "0", "-w", "/app", name });
         var it = std.mem.tokenizeAny(u8, command, " \t");
         while (it.next()) |part| try args.append(arena.allocator(), part);
-        _ = try runShellCommand(arena, args.items, expected_rc);
+        try runShellCommandStreamed(arena, args.items, expected_rc);
         return;
     }
 
